@@ -1,0 +1,14 @@
+proxy.ts(139,16): error TS7006: Parameter 'cookiesToSet' implicitly has an 'any' type.
+proxy.ts(142,35): error TS7031: Binding element 'name' implicitly has an 'any' type.
+proxy.ts(142,41): error TS7031: Binding element 'value' implicitly has an 'any' type.
+proxy.ts(151,35): error TS7031: Binding element 'name' implicitly has an 'any' type.
+proxy.ts(151,41): error TS7031: Binding element 'value' implicitly has an 'any' type.
+proxy.ts(151,48): error TS7031: Binding element 'options' implicitly has an 'any' type.
+src/components/button.tsx(3,22): error TS2307: Cannot find module 'radix-ui' or its corresponding type declarations.
+src/components/label.tsx(4,41): error TS2307: Cannot find module 'radix-ui' or its corresponding type declarations.
+src/components/ui/badge.tsx(37,31): error TS2339: Property 'Root' does not exist on type 'ForwardRefExoticComponent<HTMLAttributes<HTMLElement> & { children?: ReactNode; } & RefAttributes<HTMLElement>>'.
+src/lib/actions/category.ts(52,7): error TS2353: Object literal may only specify known properties, and 'name' does not exist in type 'never[]'.
+src/lib/supabase/server.ts(104,16): error TS7006: Parameter 'cookiesToSet' implicitly has an 'any' type.
+src/lib/supabase/server.ts(106,37): error TS7031: Binding element 'name' implicitly has an 'any' type.
+src/lib/supabase/server.ts(106,43): error TS7031: Binding element 'value' implicitly has an 'any' type.
+src/lib/supabase/server.ts(106,50): error TS7031: Binding element 'options' implicitly has an 'any' type.
