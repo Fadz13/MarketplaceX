@@ -36,6 +36,7 @@ export async function createSnapTransaction(
         id,
         order_number,
         total_amount,
+        platform_fee,
         payment_status,
         buyer:users!orders_buyer_id_fkey (
           email
@@ -69,8 +70,6 @@ export async function createSnapTransaction(
     throw new Error(`Invalid order amount: ${order.total_amount}`);
   }
 
-  const roundedAmount = Math.round(amount);
-
   const { data: orderItems, error: itemsError } = await supabase
     .from("order_items")
     .select("product_name, unit_price, quantity, subtotal")
@@ -89,13 +88,31 @@ export async function createSnapTransaction(
     customerDetails.email = buyer.email;
   }
 
-  const itemDetails = (orderItems ?? []).map(
-    (item, index) => ({
-      id: String(index + 1),
-      name: item.product_name,
-      price: Math.round(Number(item.unit_price)),
-      quantity: item.quantity,
-    }),
+  const platformFee = Math.round(Number(order.platform_fee ?? 0));
+
+  const itemDetails = [
+    ...(orderItems ?? []).map(
+      (item, index) => ({
+        id: String(index + 1),
+        name: item.product_name,
+        price: Math.round(Number(item.unit_price)),
+        quantity: item.quantity,
+      }),
+    ),
+  ];
+
+  if (platformFee > 0) {
+    itemDetails.push({
+      id: String(itemDetails.length + 1),
+      name: "Platform Fee",
+      price: platformFee,
+      quantity: 1,
+    });
+  }
+
+  const grossAmount = itemDetails.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0,
   );
 
   const snap = new Snap({
@@ -107,7 +124,7 @@ export async function createSnapTransaction(
   const parameter: Record<string, unknown> = {
     transaction_details: {
       order_id: order.order_number,
-      gross_amount: roundedAmount,
+      gross_amount: grossAmount,
     },
     credit_card: {
       secure: true,
