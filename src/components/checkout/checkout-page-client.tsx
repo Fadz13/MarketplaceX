@@ -1,7 +1,26 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { CartItem } from "@/lib/actions/cart";
+import { createOrderFromCart } from "@/lib/actions/order";
+import { createSnapTransaction } from "@/lib/actions/midtrans";
+
+declare global {
+  interface Window {
+    snap: {
+      pay: (
+        token: string,
+        options?: {
+          onSuccess?: (result: Record<string, unknown>) => void;
+          onPending?: (result: Record<string, unknown>) => void;
+          onError?: (result: Record<string, unknown>) => void;
+          onClose?: () => void;
+        },
+      ) => void;
+    };
+  }
+}
 
 type Props = {
   items: CartItem[];
@@ -28,10 +47,9 @@ const PAYMENT_OPTIONS: {
   { value: "cod", label: "COD (Bayar di Tempat)" },
 ];
 
-export function CheckoutPageClient({
-  items,
-  total,
-}: Props) {
+export function CheckoutPageClient({ items, total }: Props) {
+  const router = useRouter();
+
   const [address, setAddress] = useState<AddressForm>({
     recipientName: "",
     phone: "",
@@ -47,17 +65,12 @@ export function CheckoutPageClient({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  function handleAddressChange(
-    field: keyof AddressForm,
-    value: string,
-  ) {
+  function handleAddressChange(field: keyof AddressForm, value: string) {
     setAddress((prev) => ({ ...prev, [field]: value }));
   }
 
-  function handleSubmit() {
-    const missing = Object.entries(address).filter(
-      ([, v]) => v.trim() === "",
-    );
+  async function handleSubmit() {
+    const missing = Object.entries(address).filter(([, v]) => v.trim() === "");
 
     if (missing.length > 0) {
       setMessage("Lengkapi semua data alamat.");
@@ -67,26 +80,65 @@ export function CheckoutPageClient({
     setLoading(true);
     setMessage("");
 
-    const orderPayload = {
-      items: items.map((item) => ({
-        productId: item.product_id,
-        name: item.product_name,
-        quantity: item.quantity,
-        unitPrice: item.unit_price,
-        subtotal: item.unit_price * item.quantity,
-      })),
-      address,
-      paymentMethod,
-      total,
-    };
+    try {
+      const result = await createOrderFromCart({
+        recipientName: address.recipientName,
+        phone: address.phone,
+        addressDetail: address.addressDetail,
+        province: address.province,
+        city: address.city,
+        postalCode: address.postalCode,
+        paymentMethod,
+      });
 
-    console.log("=== PLACE ORDER (mock) ===");
-    console.log(JSON.stringify(orderPayload, null, 2));
+      if (paymentMethod === "cod") {
+        router.push(`/order-confirmation/${result.orderId}`);
+        return;
+      }
 
-    setTimeout(() => {
+      const { token } = await createSnapTransaction(result.orderId);
+
+      if (!token) {
+        setMessage("Gagal mendapatkan token pembayaran.");
+        setLoading(false);
+        return;
+      }
+
+      if (typeof window === "undefined" || !window.snap) {
+        setMessage("Midtrans belum siap. Silakan muat ulang halaman.");
+        setLoading(false);
+        return;
+      }
+
+      window.snap.pay(token, {
+        onSuccess: () => {
+          router.push(`/order-confirmation/${result.orderId}`);
+        },
+        onPending: () => {
+          router.push(`/order-confirmation/${result.orderId}`);
+        },
+        onError: () => {
+          setMessage(
+            "Pembayaran gagal. Pesanan sudah dibuat, silakan bayar dari halaman pesanan.",
+          );
+          setLoading(false);
+        },
+        onClose: () => {
+          setMessage(
+            "Anda menutup popup pembayaran. Pesanan sudah dibuat, silakan bayar dari halaman pesanan.",
+          );
+          setLoading(false);
+        },
+      });
+    } catch (err) {
+      console.error("[checkout] Error:", err);
+      const messageText =
+        err instanceof Error
+          ? err.message
+          : "Gagal membuat pesanan. Silakan coba lagi.";
+      setMessage(messageText);
       setLoading(false);
-      setMessage("Pesanan berhasil dibuat! (mock)");
-    }, 500);
+    }
   }
 
   return (
@@ -94,7 +146,7 @@ export function CheckoutPageClient({
       {message && (
         <div
           className={`rounded-lg p-3 text-sm ${
-            message.includes("berhasil")
+            message.includes("berhasil") || message.includes("success")
               ? "bg-green-50 text-green-700"
               : "bg-red-50 text-red-600"
           }`}
@@ -104,9 +156,7 @@ export function CheckoutPageClient({
       )}
 
       <div className="rounded-2xl border bg-white p-6">
-        <h2 className="mb-4 text-lg font-semibold">
-          Ringkasan Pesanan
-        </h2>
+        <h2 className="mb-4 text-lg font-semibold">Ringkasan Pesanan</h2>
 
         <div className="divide-y">
           {items.map((item) => (
@@ -115,9 +165,7 @@ export function CheckoutPageClient({
               className="flex justify-between py-3 first:pt-0 last:pb-0"
             >
               <div className="flex-1">
-                <p className="line-clamp-1 font-medium">
-                  {item.product_name}
-                </p>
+                <p className="line-clamp-1 font-medium">{item.product_name}</p>
                 <p className="text-sm text-gray-500">
                   {item.quantity} x Rp{" "}
                   {item.unit_price.toLocaleString("id-ID")}
@@ -125,10 +173,7 @@ export function CheckoutPageClient({
               </div>
 
               <p className="ml-4 font-medium">
-                Rp{" "}
-                {(item.unit_price * item.quantity).toLocaleString(
-                  "id-ID",
-                )}
+                Rp {(item.unit_price * item.quantity).toLocaleString("id-ID")}
               </p>
             </div>
           ))}
@@ -145,9 +190,7 @@ export function CheckoutPageClient({
       </div>
 
       <div className="rounded-2xl border bg-white p-6">
-        <h2 className="mb-4 text-lg font-semibold">
-          Alamat Pengiriman
-        </h2>
+        <h2 className="mb-4 text-lg font-semibold">Alamat Pengiriman</h2>
 
         <div className="space-y-4">
           <div>
@@ -180,9 +223,7 @@ export function CheckoutPageClient({
               id="phone"
               type="tel"
               value={address.phone}
-              onChange={(e) =>
-                handleAddressChange("phone", e.target.value)
-              }
+              onChange={(e) => handleAddressChange("phone", e.target.value)}
               className="w-full rounded-lg border p-2 text-sm"
               placeholder="08xxxxxxxxxx"
             />
@@ -219,9 +260,7 @@ export function CheckoutPageClient({
                 id="city"
                 type="text"
                 value={address.city}
-                onChange={(e) =>
-                  handleAddressChange("city", e.target.value)
-                }
+                onChange={(e) => handleAddressChange("city", e.target.value)}
                 className="w-full rounded-lg border p-2 text-sm"
                 placeholder="Jakarta Selatan"
               />
@@ -269,9 +308,7 @@ export function CheckoutPageClient({
       </div>
 
       <div className="rounded-2xl border bg-white p-6">
-        <h2 className="mb-4 text-lg font-semibold">
-          Metode Pembayaran
-        </h2>
+        <h2 className="mb-4 text-lg font-semibold">Metode Pembayaran</h2>
 
         <div className="space-y-2">
           {PAYMENT_OPTIONS.map((option) => (
@@ -288,14 +325,10 @@ export function CheckoutPageClient({
                 name="paymentMethod"
                 value={option.value}
                 checked={paymentMethod === option.value}
-                onChange={() =>
-                  setPaymentMethod(option.value)
-                }
+                onChange={() => setPaymentMethod(option.value)}
                 className="h-4 w-4"
               />
-              <span className="text-sm font-medium">
-                {option.label}
-              </span>
+              <span className="text-sm font-medium">{option.label}</span>
             </label>
           ))}
         </div>

@@ -239,6 +239,7 @@ export async function addToCart(
     `/products/${productIdValue}`,
   );
   revalidatePath("/cart");
+  revalidatePath("/checkout");
 }
 
 export type CartItem = {
@@ -292,20 +293,15 @@ export async function getCart(): Promise<{
 
   const { data: items, error } = await supabase
     .from("cart_items")
-    .select(`
+    .select(
+      `
       id,
       product_id,
       product_sku_id,
       quantity,
-      unit_price,
-      products (
-        name,
-        price,
-        discount_price,
-        stock,
-        has_variants
-      )
-    `)
+      unit_price
+    `,
+    )
     .eq("cart_id", cart.id)
     .order("created_at", { ascending: false });
 
@@ -313,9 +309,24 @@ export async function getCart(): Promise<{
     throw new Error(error.message);
   }
 
+  if (!items || items.length === 0) {
+    return { items: [], total: 0 };
+  }
+
   const productIds = items
     .map((item) => item.product_id)
     .filter(Boolean);
+
+  const { data: activeProducts } = await supabase
+    .from("vw_active_products")
+    .select(
+      "id, name, price, discount_price, stock, has_variants, store_name",
+    )
+    .in("id", productIds);
+
+  const productMap = new Map(
+    (activeProducts ?? []).map((p) => [p.id, p]),
+  );
 
   const { data: images } = await supabase
     .from("product_images")
@@ -330,72 +341,30 @@ export async function getCart(): Promise<{
     ]),
   );
 
-  const { data: productStores } = await supabase
-    .from("products")
-    .select("id, store_id")
-    .in("id", productIds);
+  const cartItems: CartItem[] = items.map((item) => {
+    const product = productMap.get(item.product_id);
 
-  const storeIdSet = new Set(
-    (productStores ?? [])
-      .map((ps) => ps.store_id)
-      .filter(Boolean),
-  );
-
-  const { data: storeNames } = await supabase
-    .from("stores")
-    .select("id, store_name")
-    .in("id", Array.from(storeIdSet));
-
-  const storeNameMap = new Map(
-    (storeNames ?? []).map((s) => [s.id, s.store_name]),
-  );
-
-  const productStoreMap = new Map(
-    (productStores ?? []).map((ps) => [
-      ps.id,
-      ps.store_id,
-    ]),
-  );
-
-  const cartItems: CartItem[] = (items ?? []).map(
-    (item) => {
-      const product = item.products as unknown as {
-        name: string;
-        price: number;
-        discount_price: number | null;
-        stock: number;
-        has_variants: boolean;
-      } | null;
-
-      const storeId = productStoreMap.get(
-        item.product_id,
-      );
-
-      return {
-        id: item.id,
-        product_id: item.product_id,
-        product_sku_id: item.product_sku_id,
-        quantity: item.quantity,
-        unit_price: Number(item.unit_price),
-        product_name:
-          product?.name ?? "Unknown Product",
-        product_price: Number(product?.price ?? 0),
-        product_discount_price:
-          product?.discount_price != null
-            ? Number(product.discount_price)
-            : null,
-        product_stock: product?.stock ?? 0,
-        product_image_url:
-          imageUrlMap.get(item.product_id) ?? null,
-        product_has_variants:
-          product?.has_variants ?? false,
-        store_name:
-          (storeId
-            ? storeNameMap.get(storeId)
-            : null) ?? null,
-      };
-    },
-  );
+    return {
+      id: item.id,
+      product_id: item.product_id,
+      product_sku_id: item.product_sku_id,
+      quantity: item.quantity,
+      unit_price: Number(item.unit_price),
+      product_name:
+        product?.name ?? "Unknown Product",
+      product_price: Number(product?.price ?? 0),
+      product_discount_price:
+        product?.discount_price != null
+          ? Number(product.discount_price)
+          : null,
+      product_stock: product?.stock ?? 0,
+      product_image_url:
+        imageUrlMap.get(item.product_id) ?? null,
+      product_has_variants:
+        product?.has_variants ?? false,
+      store_name: product?.store_name ?? null,
+    };
+  });
 
   const total = cartItems.reduce(
     (sum, item) => sum + item.unit_price * item.quantity,
