@@ -20,6 +20,10 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import crypto from "crypto";
+import {
+  ALLOWED_TRANSITIONS,
+} from "@/lib/order-status";
+import type { OrderStatus } from "@/lib/order-status";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -84,36 +88,19 @@ function mapTransactionStatus(
   return null;
 }
 
-type OrderStatus =
-  | "pending" | "awaiting_payment" | "paid" | "processing"
-  | "shipped" | "delivered" | "completed" | "cancelled" | "refunded" | "disputed";
-
-const ALLOWED_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  pending: ["awaiting_payment", "paid", "cancelled"],
-  awaiting_payment: ["paid", "cancelled"],
-  paid: ["processing", "cancelled", "refunded"],
-  processing: ["shipped", "cancelled", "refunded"],
-  shipped: ["delivered", "refunded", "disputed"],
-  delivered: ["completed", "refunded", "disputed"],
-  completed: ["refunded", "disputed"],
-  cancelled: [],
-  refunded: [],
-  disputed: [],
-};
-
 function deriveOrderStatus(
   currentOrderStatus: OrderStatus,
   newPaymentStatus: PaymentStatus,
 ): OrderStatus | null {
   if (newPaymentStatus === "success") {
-    const allowed = ALLOWED_ORDER_TRANSITIONS[currentOrderStatus] ?? [];
+    const allowed = ALLOWED_TRANSITIONS[currentOrderStatus] ?? [];
     if (allowed.includes("paid")) return "paid";
     if (currentOrderStatus === "paid") return null;
     return null;
   }
   if (newPaymentStatus === "failed") return null;
   if (newPaymentStatus === "refunded" || newPaymentStatus === "chargeback") {
-    const allowed = ALLOWED_ORDER_TRANSITIONS[currentOrderStatus] ?? [];
+    const allowed = ALLOWED_TRANSITIONS[currentOrderStatus] ?? [];
     if (allowed.includes("refunded")) return "refunded";
     return null;
   }

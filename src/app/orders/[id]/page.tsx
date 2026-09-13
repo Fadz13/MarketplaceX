@@ -3,19 +3,9 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getOrderDetail } from "@/lib/actions/order";
 import { CancelOrderButton } from "@/components/orders/cancel-order-button";
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Menunggu Pembayaran",
-  awaiting_payment: "Menunggu Pembayaran",
-  paid: "Dibayar",
-  processing: "Diproses",
-  shipped: "Dikirim",
-  delivered: "Diterima",
-  completed: "Selesai",
-  cancelled: "Dibatalkan",
-  refunded: "Dikembalikan",
-  disputed: "Disengketakan",
-};
+import { ConfirmReceivedButton } from "@/components/orders/confirm-received-button";
+import { CompleteOrderButton } from "@/components/orders/complete-order-button";
+import { ORDER_STATUS_LABELS } from "@/lib/order-status";
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   bank_transfer: "Bank Transfer",
@@ -136,7 +126,7 @@ export default async function OrderDetailPage({
                   : "bg-blue-100 text-blue-700"
             }`}
           >
-            {STATUS_LABELS[order.status] ??
+            {ORDER_STATUS_LABELS[order.status] ??
               order.status}
           </span>
         </div>
@@ -288,6 +278,14 @@ export default async function OrderDetailPage({
             order.status ===
               "awaiting_payment") && (
             <CancelOrderButton orderId={order.id} />
+          )}
+
+          {order.status === "shipped" && (
+            <ConfirmReceivedButton orderId={order.id} />
+          )}
+
+          {order.status === "delivered" && (
+            <CompleteOrderButton orderId={order.id} />
           )}
         </div>
       </section>

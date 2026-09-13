@@ -1,19 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Menunggu Pembayaran",
-  awaiting_payment: "Menunggu Pembayaran",
-  paid: "Dibayar",
-  processing: "Diproses",
-  shipped: "Dikirim",
-  delivered: "Diterima",
-  completed: "Selesai",
-  cancelled: "Dibatalkan",
-  refunded: "Dikembalikan",
-  disputed: "Disengketakan",
-};
+import { ORDER_STATUS_LABELS } from "@/lib/order-status";
 
 function formatPrice(n: number) {
   return new Intl.NumberFormat("id-ID", {
@@ -121,7 +109,7 @@ export default async function OrdersPage() {
                           : "bg-blue-100 text-blue-700"
                     }`}
                   >
-                    {STATUS_LABELS[o.status] ??
+                    {ORDER_STATUS_LABELS[o.status] ??
                       o.status}
                   </span>
                 </div>

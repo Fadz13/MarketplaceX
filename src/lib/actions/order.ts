@@ -2,18 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-
-type OrderStatus =
-  | "pending"
-  | "awaiting_payment"
-  | "paid"
-  | "processing"
-  | "shipped"
-  | "delivered"
-  | "completed"
-  | "cancelled"
-  | "refunded"
-  | "disputed";
+import {
+  type OrderStatus,
+  isTransitionAllowed,
+  isActorAllowed,
+  computeOrderStatus,
+} from "@/lib/order-status";
 
 type PaymentMethod =
   | "bank_transfer"
@@ -79,60 +73,28 @@ export async function createOrderFromCart(
   };
 }
 
-const ALLOWED_TRANSITIONS: Record<
-  OrderStatus,
-  OrderStatus[]
-> = {
-  pending: [
-    "awaiting_payment",
-    "cancelled",
-  ],
-
-  awaiting_payment: [
-    "paid",
-    "cancelled",
-  ],
-
-  paid: [
-    "processing",
-    "cancelled",
-    "refunded",
-  ],
-
-  processing: [
-    "shipped",
-    "cancelled",
-    "refunded",
-  ],
-
-  shipped: [
-    "delivered",
-    "refunded",
-    "disputed",
-  ],
-
-  delivered: [
-    "completed",
-    "refunded",
-    "disputed",
-  ],
-
-  completed: [
-    "refunded",
-    "disputed",
-  ],
-
-  cancelled: [],
-
-  refunded: [],
-
-  disputed: [],
-};
-
 export async function getOrderDetail(
   orderId: string,
 ) {
   const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Unauthorized.");
+  }
+
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("id, role")
+    .eq("auth_id", user.id)
+    .maybeSingle();
+
+  if (!userRow) {
+    throw new Error("Unauthorized.");
+  }
 
   const [
     { data: order, error: orderError },
@@ -231,6 +193,13 @@ export async function getOrderDetail(
     throw new Error("Order not found.");
   }
 
+  if (
+    userRow.role !== "admin" &&
+    order.buyer_id !== userRow.id
+  ) {
+    throw new Error("Unauthorized.");
+  }
+
   const paymentIds =
     (payments ?? []).map(
       (payment) => payment.id,
@@ -288,6 +257,24 @@ export async function updateOrderStatus(
   const supabase = await createClient();
 
   const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Unauthorized.");
+  }
+
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("id, role")
+    .eq("auth_id", user.id)
+    .maybeSingle();
+
+  if (!userRow || userRow.role !== "admin") {
+    throw new Error("Unauthorized.");
+  }
+
+  const {
     data: order,
     error: orderError,
   } = await supabase
@@ -316,12 +303,7 @@ export async function updateOrderStatus(
     return;
   }
 
-  const allowed =
-    ALLOWED_TRANSITIONS[
-      currentStatus
-    ] ?? [];
-
-  if (!allowed.includes(nextStatus)) {
+  if (!isTransitionAllowed(currentStatus, nextStatus)) {
     throw new Error(
       `Cannot change order status from "${currentStatus}" to "${nextStatus}".`,
     );
@@ -503,14 +485,10 @@ export async function cancelOrder(
     throw new Error("Unauthorized.");
   }
 
-  const allowed: OrderStatus[] = [
-    "pending",
-    "awaiting_payment",
-  ];
-
   if (
-    !allowed.includes(
+    !isTransitionAllowed(
       order.status as OrderStatus,
+      "cancelled",
     )
   ) {
     throw new Error(
@@ -558,6 +536,243 @@ export async function cancelOrder(
     if (payUpdateErr) {
       throw new Error(payUpdateErr.message);
     }
+  }
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/orders");
+
+  return { success: true };
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function syncParentOrderStatus(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orderId: string,
+): Promise<void> {
+  const { data: items, error } = await supabase
+    .from("order_items")
+    .select("status")
+    .eq("order_id", orderId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const itemStatuses = (items ?? []).map(
+    (i: { status: string }) => i.status as OrderStatus,
+  );
+
+  const newStatus = computeOrderStatus(itemStatuses);
+
+  const { error: updateErr } = await supabase
+    .from("orders")
+    .update({ status: newStatus, updated_at: new Date().toISOString() })
+    .eq("id", orderId);
+
+  if (updateErr) {
+    throw new Error(updateErr.message);
+  }
+}
+
+// ─── Buyer: Confirm Receipt (shipped → delivered) ────────────────────────────
+
+export async function confirmOrderReceived(
+  orderId: string,
+): Promise<{ success: boolean; message?: string }> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Unauthorized.");
+  }
+
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("id, role")
+    .eq("auth_id", user.id)
+    .maybeSingle();
+
+  if (!userRow || userRow.role !== "buyer") {
+    throw new Error("Unauthorized.");
+  }
+
+  const {
+    data: order,
+    error: orderError,
+  } = await supabase
+    .from("orders")
+    .select("id, buyer_id, status, payment_status")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (orderError) {
+    throw new Error(orderError.message);
+  }
+
+  if (!order) {
+    throw new Error("Order not found.");
+  }
+
+  if (order.buyer_id !== userRow.id) {
+    throw new Error("Unauthorized.");
+  }
+
+  if (order.payment_status !== "success") {
+    throw new Error("Payment has not been confirmed.");
+  }
+
+  const currentStatus = order.status as OrderStatus;
+
+  if (currentStatus === "delivered" || currentStatus === "completed") {
+    return { success: true, message: "Order already delivered." };
+  }
+
+  if (!isTransitionAllowed(currentStatus, "delivered")) {
+    throw new Error(
+      `Cannot confirm delivery for order with status "${currentStatus}".`,
+    );
+  }
+
+  if (!isActorAllowed("buyer", currentStatus, "delivered")) {
+    throw new Error("Unauthorized.");
+  }
+
+  const { data: shippedItems, error: itemsError } = await supabase
+    .from("order_items")
+    .select("id, status")
+    .eq("order_id", orderId)
+    .eq("status", "shipped");
+
+  if (itemsError) {
+    throw new Error(itemsError.message);
+  }
+
+  if (!shippedItems || shippedItems.length === 0) {
+    throw new Error("No shipped items to confirm.");
+  }
+
+  const now = new Date().toISOString();
+
+  for (const item of shippedItems) {
+    const { error: updateErr } = await supabase
+      .from("order_items")
+      .update({ status: "delivered", updated_at: now })
+      .eq("id", item.id);
+
+    if (updateErr) {
+      throw new Error(updateErr.message);
+    }
+  }
+
+  await syncParentOrderStatus(supabase, orderId);
+
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/orders");
+
+  return { success: true };
+}
+
+// ─── Buyer: Complete Order (delivered → completed) ───────────────────────────
+
+export async function completeOrder(
+  orderId: string,
+): Promise<{ success: boolean; message?: string }> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Unauthorized.");
+  }
+
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("id, role")
+    .eq("auth_id", user.id)
+    .maybeSingle();
+
+  if (!userRow || userRow.role !== "buyer") {
+    throw new Error("Unauthorized.");
+  }
+
+  const {
+    data: order,
+    error: orderError,
+  } = await supabase
+    .from("orders")
+    .select("id, buyer_id, status, payment_status")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (orderError) {
+    throw new Error(orderError.message);
+  }
+
+  if (!order) {
+    throw new Error("Order not found.");
+  }
+
+  if (order.buyer_id !== userRow.id) {
+    throw new Error("Unauthorized.");
+  }
+
+  const currentStatus = order.status as OrderStatus;
+
+  if (currentStatus === "completed") {
+    return { success: true, message: "Order already completed." };
+  }
+
+  if (!isTransitionAllowed(currentStatus, "completed")) {
+    throw new Error(
+      `Cannot complete order with status "${currentStatus}".`,
+    );
+  }
+
+  if (!isActorAllowed("buyer", currentStatus, "completed")) {
+    throw new Error("Unauthorized.");
+  }
+
+  const { data: items, error: itemsError } = await supabase
+    .from("order_items")
+    .select("id, status")
+    .eq("order_id", orderId);
+
+  if (itemsError) {
+    throw new Error(itemsError.message);
+  }
+
+  const allDelivered = (items ?? []).every(
+    (i) => i.status === "delivered",
+  );
+
+  if (!allDelivered) {
+    throw new Error("Not all items have been delivered yet.");
+  }
+
+  const { error: updateErr } = await supabase
+    .from("orders")
+    .update({ status: "completed" })
+    .eq("id", orderId);
+
+  if (updateErr) {
+    throw new Error(updateErr.message);
+  }
+
+  const now = new Date().toISOString();
+
+  const { error: itemUpdateErr } = await supabase
+    .from("order_items")
+    .update({ status: "completed", updated_at: now })
+    .eq("order_id", orderId);
+
+  if (itemUpdateErr) {
+    throw new Error(itemUpdateErr.message);
   }
 
   revalidatePath(`/orders/${orderId}`);

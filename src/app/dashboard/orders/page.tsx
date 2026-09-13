@@ -1,17 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { OrdersClient } from "@/components/orders/orders-client";
-
-type OrderStatus =
-  | "pending"
-  | "awaiting_payment"
-  | "paid"
-  | "processing"
-  | "shipped"
-  | "delivered"
-  | "completed"
-  | "cancelled"
-  | "refunded"
-  | "disputed";
+import { type OrderStatus } from "@/lib/order-status";
 
 type Order = {
   id: string;

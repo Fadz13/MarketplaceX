@@ -2,24 +2,12 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getOrderDetail } from "@/lib/actions/order";
+import { ORDER_STATUS_LABELS } from "@/lib/order-status";
 
 type PageProps = {
   params: Promise<{
     orderId: string;
   }>;
-};
-
-const ORDER_STATUS_LABELS: Record<string, string> = {
-  pending: "Menunggu Pembayaran",
-  awaiting_payment: "Menunggu Pembayaran",
-  paid: "Dibayar",
-  processing: "Diproses",
-  shipped: "Dikirim",
-  delivered: "Diterima",
-  completed: "Selesai",
-  cancelled: "Dibatalkan",
-  refunded: "Dikembalikan",
-  disputed: "Disengketakan",
 };
 
 const PAYMENT_STATUS_CONFIG: Record<

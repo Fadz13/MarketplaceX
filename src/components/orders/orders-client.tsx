@@ -13,17 +13,11 @@ import {
   updateOrderStatus,
 } from "@/lib/actions/order";
 
-type OrderStatus =
-  | "pending"
-  | "awaiting_payment"
-  | "paid"
-  | "processing"
-  | "shipped"
-  | "delivered"
-  | "completed"
-  | "cancelled"
-  | "refunded"
-  | "disputed";
+import {
+  type OrderStatus,
+  ALLOWED_TRANSITIONS,
+  ORDER_STATUS_COLORS,
+} from "@/lib/order-status";
 
 type Order = {
   id: string;
@@ -54,16 +48,7 @@ const ITEMS_PER_PAGE = 10;
 
 const STATUS_OPTIONS = [
   "all",
-  "pending",
-  "awaiting_payment",
-  "paid",
-  "processing",
-  "shipped",
-  "delivered",
-  "completed",
-  "cancelled",
-  "refunded",
-  "disputed",
+  ...Object.keys(ALLOWED_TRANSITIONS),
 ] as const;
 
 const PAYMENT_METHODS = [
@@ -75,56 +60,6 @@ const PAYMENT_METHODS = [
   "cod",
   "marketplace_credit",
 ] as const;
-
-const ORDER_TRANSITIONS: Record<
-  OrderStatus,
-  OrderStatus[]
-> = {
-  pending: [
-    "awaiting_payment",
-    "cancelled",
-  ],
-
-  awaiting_payment: [
-    "paid",
-    "cancelled",
-  ],
-
-  paid: [
-    "processing",
-    "cancelled",
-    "refunded",
-  ],
-
-  processing: [
-    "shipped",
-    "cancelled",
-    "refunded",
-  ],
-
-  shipped: [
-    "delivered",
-    "refunded",
-    "disputed",
-  ],
-
-  delivered: [
-    "completed",
-    "refunded",
-    "disputed",
-  ],
-
-  completed: [
-    "refunded",
-    "disputed",
-  ],
-
-  cancelled: [],
-
-  refunded: [],
-
-  disputed: [],
-};
 
 function formatPrice(value: number) {
   return new Intl.NumberFormat("id-ID", {
@@ -143,40 +78,10 @@ function formatStatus(status: string) {
 }
 
 function getStatusClass(status: string) {
-  switch (status) {
-    case "pending":
-      return "bg-gray-100 text-gray-700";
-
-    case "awaiting_payment":
-      return "bg-yellow-100 text-yellow-700";
-
-    case "paid":
-      return "bg-blue-100 text-blue-700";
-
-    case "processing":
-      return "bg-purple-100 text-purple-700";
-
-    case "shipped":
-      return "bg-indigo-100 text-indigo-700";
-
-    case "delivered":
-      return "bg-cyan-100 text-cyan-700";
-
-    case "completed":
-      return "bg-green-100 text-green-700";
-
-    case "cancelled":
-      return "bg-red-100 text-red-700";
-
-    case "refunded":
-      return "bg-orange-100 text-orange-700";
-
-    case "disputed":
-      return "bg-pink-100 text-pink-700";
-
-    default:
-      return "bg-gray-100 text-gray-700";
-  }
+  return (
+    ORDER_STATUS_COLORS[status as OrderStatus] ??
+    "bg-gray-100 text-gray-700"
+  );
 }
 
 function getTransitionButtonClass(
@@ -538,7 +443,7 @@ export function OrdersClient({
 
   const availableTransitions =
     detail
-      ? ORDER_TRANSITIONS[
+      ? ALLOWED_TRANSITIONS[
           detail.order
             .status as OrderStatus
         ] ?? []

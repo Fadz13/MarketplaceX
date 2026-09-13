@@ -2,18 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { createServiceClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
-
-type OrderStatus =
-  | "pending"
-  | "awaiting_payment"
-  | "paid"
-  | "processing"
-  | "shipped"
-  | "delivered"
-  | "completed"
-  | "cancelled"
-  | "refunded"
-  | "disputed";
+import {
+  type OrderStatus,
+  ALLOWED_TRANSITIONS,
+} from "@/lib/order-status";
 
 type PaymentStatus =
   | "pending"
@@ -25,19 +17,6 @@ type PaymentStatus =
 
 type PaymentUpdate = Database["public"]["Tables"]["payments"]["Update"];
 type OrderUpdate = Database["public"]["Tables"]["orders"]["Update"];
-
-const ALLOWED_ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  pending: ["awaiting_payment", "paid", "cancelled"],
-  awaiting_payment: ["paid", "cancelled"],
-  paid: ["processing", "cancelled", "refunded"],
-  processing: ["shipped", "cancelled", "refunded"],
-  shipped: ["delivered", "refunded", "disputed"],
-  delivered: ["completed", "refunded", "disputed"],
-  completed: ["refunded", "disputed"],
-  cancelled: [],
-  refunded: [],
-  disputed: [],
-};
 
 const ACCEPTED_TRANSACTION_STATUSES = [
   "capture",
@@ -135,7 +114,7 @@ function deriveOrderStatus(
   newPaymentStatus: PaymentStatus,
 ): OrderStatus | null {
   if (newPaymentStatus === "success") {
-    const allowed = ALLOWED_ORDER_TRANSITIONS[currentOrderStatus] ?? [];
+    const allowed = ALLOWED_TRANSITIONS[currentOrderStatus] ?? [];
     if (allowed.includes("paid")) return "paid";
     if (currentOrderStatus === "paid") return null;
     return null;
@@ -146,7 +125,7 @@ function deriveOrderStatus(
   }
 
   if (newPaymentStatus === "refunded" || newPaymentStatus === "chargeback") {
-    const allowed = ALLOWED_ORDER_TRANSITIONS[currentOrderStatus] ?? [];
+    const allowed = ALLOWED_TRANSITIONS[currentOrderStatus] ?? [];
     if (allowed.includes("refunded")) return "refunded";
     return null;
   }

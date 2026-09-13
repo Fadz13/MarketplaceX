@@ -2,6 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import {
+  type OrderStatus,
+  isTransitionAllowed,
+} from "@/lib/order-status";
 
 type PaymentMethod =
   | "bank_transfer"
@@ -159,6 +163,30 @@ export async function markPaymentAsPaid(
 
   if (payment.status === "success") {
     return;
+  }
+
+  const {
+    data: order,
+    error: orderFetchError,
+  } = await supabase
+    .from("orders")
+    .select("id, status")
+    .eq("id", payment.order_id)
+    .maybeSingle();
+
+  if (orderFetchError) {
+    throw new Error(orderFetchError.message);
+  }
+
+  if (!order) {
+    throw new Error("Order not found.");
+  }
+
+  const currentOrderStatus = order.status as OrderStatus;
+  if (!isTransitionAllowed(currentOrderStatus, "paid")) {
+    throw new Error(
+      `Cannot mark payment as paid: order status "${currentOrderStatus}" does not allow transition to "paid".`,
+    );
   }
 
   const {

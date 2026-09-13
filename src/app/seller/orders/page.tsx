@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SellerOrdersClient } from "@/components/seller/seller-orders-client";
+import { type OrderStatus, ALL_ORDER_STATUSES } from "@/lib/order-status";
 
 type PageProps = {
   searchParams: Promise<{
@@ -42,6 +43,7 @@ export default async function SellerOrdersPage({
       product_name,
       quantity,
       subtotal,
+      status,
       orders!inner (
         id,
         order_number,
@@ -59,20 +61,12 @@ export default async function SellerOrdersPage({
     });
 
   if (status) {
-    query = query.eq(
-      "orders.status",
-      status as
-        | "pending"
-        | "awaiting_payment"
-        | "paid"
-        | "processing"
-        | "shipped"
-        | "delivered"
-        | "completed"
-        | "cancelled"
-        | "refunded"
-        | "disputed",
-    );
+    if (ALL_ORDER_STATUSES.includes(status as OrderStatus)) {
+      query = query.eq(
+        "status",
+        status as OrderStatus,
+      );
+    }
   }
 
   const { data: items } = await query;
