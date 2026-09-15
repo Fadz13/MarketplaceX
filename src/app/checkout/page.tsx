@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getCart } from "@/lib/actions/cart";
 import { CheckoutPageClient } from "@/components/checkout/checkout-page-client";
+import type { Address } from "@/lib/actions/address";
 
 export default async function CheckoutPage() {
   const supabase = await createClient();
@@ -19,6 +20,23 @@ export default async function CheckoutPage() {
 
   if (items.length === 0) {
     redirect("/cart");
+  }
+
+  const { data: buyerRow } = await supabase
+    .from("users")
+    .select("id")
+    .eq("auth_id", user.id)
+    .maybeSingle();
+
+  let addresses: Address[] = [];
+  if (buyerRow) {
+    const { data } = await supabase
+      .from("addresses")
+      .select("*")
+      .eq("user_id", buyerRow.id)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: false });
+    addresses = (data ?? []) as Address[];
   }
 
   return (
@@ -49,6 +67,7 @@ export default async function CheckoutPage() {
         <CheckoutPageClient
           items={items}
           total={total}
+          addresses={addresses}
         />
       </section>
     </main>

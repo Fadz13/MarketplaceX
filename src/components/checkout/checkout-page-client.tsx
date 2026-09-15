@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CartItem } from "@/lib/actions/cart";
+import type { Address } from "@/lib/actions/address";
 import { createOrderFromCart } from "@/lib/actions/order";
 import { createSnapTransaction } from "@/lib/actions/midtrans";
 
@@ -25,6 +26,7 @@ declare global {
 type Props = {
   items: CartItem[];
   total: number;
+  addresses: Address[];
 };
 
 type AddressForm = {
@@ -47,17 +49,39 @@ const PAYMENT_OPTIONS: {
   { value: "cod", label: "COD (Bayar di Tempat)" },
 ];
 
-export function CheckoutPageClient({ items, total }: Props) {
+function addressToForm(addr: Address): AddressForm {
+  return {
+    recipientName: addr.recipient_name,
+    phone: addr.phone,
+    addressDetail: addr.address_detail,
+    city: addr.city,
+    province: addr.province,
+    postalCode: addr.postal_code,
+  };
+}
+
+export function CheckoutPageClient({ items, total, addresses }: Props) {
   const router = useRouter();
 
-  const [address, setAddress] = useState<AddressForm>({
-    recipientName: "",
-    phone: "",
-    addressDetail: "",
-    city: "",
-    province: "",
-    postalCode: "",
-  });
+  const defaultAddr = addresses.find((a) => a.is_default) ?? addresses[0] ?? null;
+
+  const [mode, setMode] = useState<"saved" | "new">(
+    defaultAddr ? "saved" : "new",
+  );
+  const [selectedId, setSelectedId] = useState<string | null>(
+    defaultAddr?.id ?? null,
+  );
+
+  const [address, setAddress] = useState<AddressForm>(
+    defaultAddr ? addressToForm(defaultAddr) : {
+      recipientName: "",
+      phone: "",
+      addressDetail: "",
+      city: "",
+      province: "",
+      postalCode: "",
+    },
+  );
 
   const [paymentMethod, setPaymentMethod] =
     useState<PaymentMethod>("bank_transfer");
@@ -65,12 +89,35 @@ export function CheckoutPageClient({ items, total }: Props) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
+  function handleSelectSaved(addr: Address) {
+    setSelectedId(addr.id);
+    setAddress(addressToForm(addr));
+  }
+
+  function handleUseNew() {
+    setMode("new");
+    setSelectedId(null);
+    setAddress({
+      recipientName: "",
+      phone: "",
+      addressDetail: "",
+      city: "",
+      province: "",
+      postalCode: "",
+    });
+  }
+
   function handleAddressChange(field: keyof AddressForm, value: string) {
     setAddress((prev) => ({ ...prev, [field]: value }));
   }
 
+  function getActiveAddress(): AddressForm {
+    return address;
+  }
+
   async function handleSubmit() {
-    const missing = Object.entries(address).filter(([, v]) => v.trim() === "");
+    const addr = getActiveAddress();
+    const missing = Object.entries(addr).filter(([, v]) => v.trim() === "");
 
     if (missing.length > 0) {
       setMessage("Lengkapi semua data alamat.");
@@ -82,12 +129,12 @@ export function CheckoutPageClient({ items, total }: Props) {
 
     try {
       const result = await createOrderFromCart({
-        recipientName: address.recipientName,
-        phone: address.phone,
-        addressDetail: address.addressDetail,
-        province: address.province,
-        city: address.city,
-        postalCode: address.postalCode,
+        recipientName: addr.recipientName,
+        phone: addr.phone,
+        addressDetail: addr.addressDetail,
+        province: addr.province,
+        city: addr.city,
+        postalCode: addr.postalCode,
         paymentMethod,
       });
 
@@ -192,119 +239,191 @@ export function CheckoutPageClient({ items, total }: Props) {
       <div className="rounded-2xl border bg-white p-6">
         <h2 className="mb-4 text-lg font-semibold">Alamat Pengiriman</h2>
 
-        <div className="space-y-4">
-          <div>
-            <label
-              htmlFor="recipientName"
-              className="mb-1 block text-sm font-medium text-gray-700"
+        {addresses.length > 0 && (
+          <div className="mb-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setMode("saved");
+                if (defaultAddr) handleSelectSaved(defaultAddr);
+              }}
+              className={`rounded-lg border px-3 py-1.5 text-sm ${
+                mode === "saved"
+                  ? "border-black bg-black text-white"
+                  : "hover:bg-gray-50"
+              }`}
             >
-              Nama Penerima
-            </label>
-            <input
-              id="recipientName"
-              type="text"
-              value={address.recipientName}
-              onChange={(e) =>
-                handleAddressChange("recipientName", e.target.value)
-              }
-              className="w-full rounded-lg border p-2 text-sm"
-              placeholder="Nama lengkap"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="phone"
-              className="mb-1 block text-sm font-medium text-gray-700"
+              Alamat Tersimpan
+            </button>
+            <button
+              type="button"
+              onClick={handleUseNew}
+              className={`rounded-lg border px-3 py-1.5 text-sm ${
+                mode === "new"
+                  ? "border-black bg-black text-white"
+                  : "hover:bg-gray-50"
+              }`}
             >
-              No. HP
-            </label>
-            <input
-              id="phone"
-              type="tel"
-              value={address.phone}
-              onChange={(e) => handleAddressChange("phone", e.target.value)}
-              className="w-full rounded-lg border p-2 text-sm"
-              placeholder="08xxxxxxxxxx"
-            />
+              Alamat Baru
+            </button>
           </div>
+        )}
 
-          <div>
-            <label
-              htmlFor="addressDetail"
-              className="mb-1 block text-sm font-medium text-gray-700"
-            >
-              Alamat Lengkap
-            </label>
-            <textarea
-              id="addressDetail"
-              value={address.addressDetail}
-              onChange={(e) =>
-                handleAddressChange("addressDetail", e.target.value)
-              }
-              className="w-full rounded-lg border p-2 text-sm"
-              rows={3}
-              placeholder="Jalan, nomor, RT/RW, kelurahan"
-            />
+        {mode === "saved" && addresses.length > 0 && (
+          <div className="space-y-2">
+            {addresses.map((addr) => (
+              <label
+                key={addr.id}
+                className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition ${
+                  selectedId === addr.id
+                    ? "border-black bg-gray-50"
+                    : "hover:bg-gray-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="savedAddress"
+                  checked={selectedId === addr.id}
+                  onChange={() => handleSelectSaved(addr)}
+                  className="mt-1 h-4 w-4"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{addr.label}</span>
+                    {addr.is_default && (
+                      <span className="rounded-full bg-black px-2 py-0.5 text-xs font-medium text-white">
+                        Utama
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-sm text-gray-700">
+                    {addr.recipient_name} · {addr.phone}
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    {addr.address_detail}, {addr.district}, {addr.city},{" "}
+                    {addr.province} {addr.postal_code}
+                  </p>
+                </div>
+              </label>
+            ))}
           </div>
+        )}
 
-          <div className="grid grid-cols-2 gap-4">
+        {mode === "new" && (
+          <div className="space-y-4">
             <div>
               <label
-                htmlFor="city"
+                htmlFor="recipientName"
                 className="mb-1 block text-sm font-medium text-gray-700"
               >
-                Kota
+                Nama Penerima
               </label>
               <input
-                id="city"
+                id="recipientName"
                 type="text"
-                value={address.city}
-                onChange={(e) => handleAddressChange("city", e.target.value)}
-                className="w-full rounded-lg border p-2 text-sm"
-                placeholder="Jakarta Selatan"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="province"
-                className="mb-1 block text-sm font-medium text-gray-700"
-              >
-                Provinsi
-              </label>
-              <input
-                id="province"
-                type="text"
-                value={address.province}
+                value={address.recipientName}
                 onChange={(e) =>
-                  handleAddressChange("province", e.target.value)
+                  handleAddressChange("recipientName", e.target.value)
                 }
                 className="w-full rounded-lg border p-2 text-sm"
-                placeholder="DKI Jakarta"
+                placeholder="Nama lengkap"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="phone"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
+                No. HP
+              </label>
+              <input
+                id="phone"
+                type="tel"
+                value={address.phone}
+                onChange={(e) => handleAddressChange("phone", e.target.value)}
+                className="w-full rounded-lg border p-2 text-sm"
+                placeholder="08xxxxxxxxxx"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="addressDetail"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
+                Alamat Lengkap
+              </label>
+              <textarea
+                id="addressDetail"
+                value={address.addressDetail}
+                onChange={(e) =>
+                  handleAddressChange("addressDetail", e.target.value)
+                }
+                className="w-full rounded-lg border p-2 text-sm"
+                rows={3}
+                placeholder="Jalan, nomor, RT/RW, kelurahan"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label
+                  htmlFor="city"
+                  className="mb-1 block text-sm font-medium text-gray-700"
+                >
+                  Kota
+                </label>
+                <input
+                  id="city"
+                  type="text"
+                  value={address.city}
+                  onChange={(e) => handleAddressChange("city", e.target.value)}
+                  className="w-full rounded-lg border p-2 text-sm"
+                  placeholder="Jakarta Selatan"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="province"
+                  className="mb-1 block text-sm font-medium text-gray-700"
+                >
+                  Provinsi
+                </label>
+                <input
+                  id="province"
+                  type="text"
+                  value={address.province}
+                  onChange={(e) =>
+                    handleAddressChange("province", e.target.value)
+                  }
+                  className="w-full rounded-lg border p-2 text-sm"
+                  placeholder="DKI Jakarta"
+                />
+              </div>
+            </div>
+
+            <div className="w-1/2">
+              <label
+                htmlFor="postalCode"
+                className="mb-1 block text-sm font-medium text-gray-700"
+              >
+                Kode Pos
+              </label>
+              <input
+                id="postalCode"
+                type="text"
+                value={address.postalCode}
+                onChange={(e) =>
+                  handleAddressChange("postalCode", e.target.value)
+                }
+                className="w-full rounded-lg border p-2 text-sm"
+                placeholder="12345"
               />
             </div>
           </div>
-
-          <div className="w-1/2">
-            <label
-              htmlFor="postalCode"
-              className="mb-1 block text-sm font-medium text-gray-700"
-            >
-              Kode Pos
-            </label>
-            <input
-              id="postalCode"
-              type="text"
-              value={address.postalCode}
-              onChange={(e) =>
-                handleAddressChange("postalCode", e.target.value)
-              }
-              className="w-full rounded-lg border p-2 text-sm"
-              placeholder="12345"
-            />
-          </div>
-        </div>
+        )}
       </div>
 
       <div className="rounded-2xl border bg-white p-6">
