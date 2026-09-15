@@ -298,23 +298,87 @@ export async function POST(req: NextRequest) {
     //   a) Payment was already processed (idempotent retry — success)
     //   b) Payment already failed (idempotent retry)
     //   c) Payment was never created (shouldn't happen in normal flow)
+    //   d) Payment updated but order update failed previously (partial failure)
     //
     // BUG-2 fix: Verify order status is consistent with what we'd expect.
     // If the order isn't in the expected state, attempt to repair it.
+
+    // ── Repair: success with no pending payment ─────────────────────────
     if (newPaymentStatus === "success" && order.status !== "paid") {
       console.warn(
         "[midtrans-webhook] No pending payment but order not paid. Repairing order:",
         orderId,
       );
-      const repairUpdate: OrderUpdate = {
-        payment_status: newPaymentStatus,
-        status: "paid",
-      };
-      await supabase
+      const { error: repairErr } = await supabase
         .from("orders")
-        .update(repairUpdate)
+        .update({
+          payment_status: newPaymentStatus,
+          status: "paid",
+        } satisfies OrderUpdate)
         .eq("id", order.id)
         .neq("payment_status", newPaymentStatus);
+
+      if (repairErr) {
+        console.error(
+          "[midtrans-webhook] Repair (success) failed for order:",
+          orderId,
+          repairErr,
+        );
+        return NextResponse.json(
+          { error: "Repair failed" },
+          { status: 500 },
+        );
+      }
+    }
+
+    // ── Repair: refund with no pending payment ──────────────────────────
+    // Handles partial failure where payment was updated to "refunded" but
+    // the order update failed. On retry, the pending payment lookup finds
+    // nothing (already updated), so we must repair the order here.
+    if (newPaymentStatus === "refunded" && order.status !== "refunded") {
+      console.warn(
+        "[midtrans-webhook] No pending payment but order not refunded. Repairing order:",
+        orderId,
+      );
+      const { error: repairOrderErr } = await supabase
+        .from("orders")
+        .update({
+          payment_status: "refunded",
+          status: "refunded",
+        } satisfies OrderUpdate)
+        .eq("id", order.id)
+        .neq("payment_status", "refunded");
+
+      if (repairOrderErr) {
+        console.error(
+          "[midtrans-webhook] Repair (refund) order update failed for order:",
+          orderId,
+          repairOrderErr,
+        );
+        return NextResponse.json(
+          { error: "Repair failed" },
+          { status: 500 },
+        );
+      }
+
+      // Also repair order_items — idempotent via neq guard
+      const { error: repairItemsErr } = await supabase
+        .from("order_items")
+        .update({ status: "refunded" })
+        .eq("order_id", order.id)
+        .neq("status", "refunded");
+
+      if (repairItemsErr) {
+        console.error(
+          "[midtrans-webhook] Repair (refund) items update failed for order:",
+          orderId,
+          repairItemsErr,
+        );
+        return NextResponse.json(
+          { error: "Repair failed" },
+          { status: 500 },
+        );
+      }
     }
 
     console.warn(
@@ -396,6 +460,22 @@ export async function POST(req: NextRequest) {
         "Order will be repaired on next webhook retry.",
       );
       return NextResponse.json({ error: "Failed to update order" }, { status: 500 });
+    }
+
+    // ── Update order_items status on refund ──────────────────────────
+    if (newOrderStatus === "refunded") {
+      const { error: itemsUpdateError } = await supabase
+        .from("order_items")
+        .update({ status: "refunded", updated_at: now })
+        .eq("order_id", order.id)
+        .neq("status", "refunded");
+
+      if (itemsUpdateError) {
+        console.error(
+          "[midtrans-webhook] CRITICAL: Order refunded but items update failed:",
+          itemsUpdateError,
+        );
+      }
     }
   }
 

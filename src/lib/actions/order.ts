@@ -512,6 +512,18 @@ export async function cancelOrder(
     throw new Error(updateErr.message);
   }
 
+  const { error: itemUpdateErr } = await supabase
+    .from("order_items")
+    .update({
+      status: "cancelled",
+      updated_at: now,
+    })
+    .eq("order_id", orderId);
+
+  if (itemUpdateErr) {
+    throw new Error(itemUpdateErr.message);
+  }
+
   if (
     order.payment_status === "pending"
   ) {

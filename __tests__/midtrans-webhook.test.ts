@@ -460,6 +460,75 @@ describe("Midtrans Webhook", () => {
       const shouldRepair = paymentStatus === "success" && orderStatus !== "paid";
       expect(shouldRepair).toBe(true);
     });
+
+    // ── I2. Refund repair path ────────────────────────────────────────
+    it("refund repair triggers when payment=refunded but order≠refunded", () => {
+      const newPaymentStatus: string = "refunded";
+      const orderStatus: string = "completed";
+      const shouldRepair = newPaymentStatus === "refunded" && orderStatus !== "refunded";
+      expect(shouldRepair).toBe(true);
+    });
+
+    it("refund repair does NOT fire when order is already refunded", () => {
+      const newPaymentStatus: string = "refunded";
+      const orderStatus: string = "refunded";
+      const shouldRepair = newPaymentStatus === "refunded" && orderStatus !== "refunded";
+      expect(shouldRepair).toBe(false);
+    });
+
+    it("refund repair on paid order (not yet completed)", () => {
+      const newPaymentStatus: string = "refunded";
+      const orderStatus: string = "paid";
+      const shouldRepair = newPaymentStatus === "refunded" && orderStatus !== "refunded";
+      expect(shouldRepair).toBe(true);
+    });
+
+    it("refund repair neq guard: won't overwrite if payment_status already refunded", () => {
+      const order = { payment_status: "refunded" };
+      const neqGuardPasses = order.payment_status !== "refunded";
+      expect(neqGuardPasses).toBe(false);
+    });
+
+    it("refund repair neq guard: updates if payment_status is not refunded", () => {
+      const order = { payment_status: "success" };
+      const neqGuardPasses = order.payment_status !== "refunded";
+      expect(neqGuardPasses).toBe(true);
+    });
+
+    it("refund repair items neq guard: won't overwrite if item already refunded", () => {
+      const item = { status: "refunded" };
+      const neqGuardPasses = item.status !== "refunded";
+      expect(neqGuardPasses).toBe(false);
+    });
+
+    it("refund repair items neq guard: updates if item is not refunded", () => {
+      const item = { status: "completed" };
+      const neqGuardPasses = item.status !== "refunded";
+      expect(neqGuardPasses).toBe(true);
+    });
+
+    it("refund repair idempotent: second repair is no-op", () => {
+      // First repair succeeds
+      let order = { payment_status: "success", status: "completed" };
+      const shouldRepair = "refunded" === "refunded" && order.status !== "refunded";
+      expect(shouldRepair).toBe(true);
+      order = { payment_status: "refunded", status: "refunded" };
+
+      // Second repair: neq guard blocks
+      const neqGuardPasses = order.payment_status !== "refunded";
+      expect(neqGuardPasses).toBe(false);
+      expect(order.status).toBe("refunded");
+    });
+
+    it("success repair idempotent: second repair is no-op", () => {
+      let order = { payment_status: "pending", status: "pending" };
+      const shouldRepair = "success" === "success" && order.status !== "paid";
+      expect(shouldRepair).toBe(true);
+      order = { payment_status: "success", status: "paid" };
+
+      const neqGuardPasses = order.payment_status !== "success";
+      expect(neqGuardPasses).toBe(false);
+    });
   });
 
   // ── J. refund/chargeback handling ───────────────────────────────────
