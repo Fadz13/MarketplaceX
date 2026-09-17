@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SearchBar } from "@/components/search/search-bar";
+import { AccountMenu } from "@/components/search/account-menu";
 
 type Props = {
   searchQuery?: string | undefined;
@@ -11,6 +12,34 @@ export async function SiteHeader({ searchQuery }: Props) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  let avatarUrl: string | null = null;
+  let displayName = "";
+  let email = "";
+
+  if (user) {
+    email = user.email ?? "";
+
+    const { data: buyerRow } = await supabase
+      .from("users")
+      .select("id")
+      .eq("auth_id", user.id)
+      .maybeSingle();
+
+    if (buyerRow) {
+      const { data: profile } = await supabase
+        .from("user_profiles")
+        .select("full_name, avatar_url")
+        .eq("user_id", buyerRow.id)
+        .maybeSingle();
+
+      avatarUrl = profile?.avatar_url ?? null;
+      displayName =
+        profile?.full_name?.trim() || email.split("@")[0] || "Akun";
+    } else {
+      displayName = email.split("@")[0] || "Akun";
+    }
+  }
 
   return (
     <header className="border-b bg-white">
@@ -25,33 +54,26 @@ export async function SiteHeader({ searchQuery }: Props) {
 
         <div className="flex items-center gap-3">
           {user ? (
-            <>
-              <span className="hidden text-sm text-gray-600 md:inline">
-                {user.email}
-              </span>
-              <Link
-                href="/cart"
-                className="rounded-lg bg-black px-4 py-2 text-sm text-white"
-              >
-                Cart
-              </Link>
-            </>
+            <AccountMenu
+              avatarUrl={avatarUrl}
+              displayName={displayName}
+              email={email}
+            />
           ) : (
-            <>
-              <Link
-                href="/login"
-                className="rounded-lg border px-4 py-2 text-sm"
-              >
-                Login
-              </Link>
-              <Link
-                href="/cart"
-                className="rounded-lg bg-black px-4 py-2 text-sm text-white"
-              >
-                Cart
-              </Link>
-            </>
+            <Link
+              href="/login"
+              className="rounded-lg border px-4 py-2 text-sm"
+            >
+              Login
+            </Link>
           )}
+
+          <Link
+            href="/cart"
+            className="rounded-lg bg-black px-4 py-2 text-sm text-white"
+          >
+            Cart
+          </Link>
         </div>
       </div>
 
